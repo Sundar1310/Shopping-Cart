@@ -1,5 +1,8 @@
+from flask import Flask, jsonify
 import uuid
 from datetime import datetime
+
+app = Flask(__name__)
 
 # =============================
 # Data Classes and Structures
@@ -21,46 +24,35 @@ class User:
 class ShoppingCart:
     def __init__(self, user):
         self.user = user
-        self.items = {}  # product_id -> quantity
+        self.items = {}
 
     def add_item(self, product, quantity):
         if product.stock < quantity:
-            print(f"Not enough stock for {product.name}")
-            return
+            return f"Not enough stock for {product.name}"
         self.items[product.id] = self.items.get(product.id, 0) + quantity
         product.stock -= quantity
-        print(f"Added {quantity} x {product.name} to cart.")
-
-    def remove_item(self, product, quantity):
-        if product.id not in self.items:
-            print("Item not in cart.")
-            return
-        if quantity >= self.items[product.id]:
-            quantity = self.items[product.id]
-        self.items[product.id] -= quantity
-        product.stock += quantity
-        if self.items[product.id] == 0:
-            del self.items[product.id]
-        print(f"Removed {quantity} x {product.name} from cart.")
+        return f"Added {quantity} x {product.name} to cart."
 
     def view_cart(self, product_db):
-        print(f"\nCart for {self.user.username}:")
+        cart_details = []
         total = 0
         for pid, qty in self.items.items():
             product = product_db[pid]
             cost = qty * product.price
-            print(f"- {product.name}: {qty} x ₹{product.price} = ₹{cost}")
+            cart_details.append({
+                'product': product.name,
+                'quantity': qty,
+                'price': product.price,
+                'cost': cost
+            })
             total += cost
-        print(f"Total: ₹{total}")
-        return total
+        return cart_details, total
 
     def checkout(self, product_db):
-        total = self.view_cart(product_db)
-        print(f"\nProceeding to checkout... Total amount ₹{total}")
+        cart_details, total = self.view_cart(product_db)
         order = Order(self.user, self.items.copy(), total)
         self.items.clear()
-        return order
-
+        return order.to_dict()
 
 class Order:
     def __init__(self, user, items, total_amount):
@@ -70,50 +62,68 @@ class Order:
         self.total_amount = total_amount
         self.status = "Placed"
         self.created_at = datetime.now()
-        print(f"✅ Order {self.order_id} placed successfully on {self.created_at}")
 
-
-# =============================
-# Mock Database
-# =============================
+    def to_dict(self):
+        return {
+            "order_id": self.order_id,
+            "user": self.user.username,
+            "total_amount": self.total_amount,
+            "status": self.status,
+            "created_at": self.created_at.strftime('%Y-%m-%d %H:%M:%S')
+        }
 
 class Shop:
     def __init__(self):
-        self.products = {}  # id -> Product
-        self.users = {}     # id -> User
+        self.products = {}
+        self.users = {}
 
     def add_product(self, name, price, stock):
         p = Product(name, price, stock)
         self.products[p.id] = p
-        print(f"Added product: {name} | Price: ₹{price} | Stock: {stock}")
         return p
 
     def register_user(self, username):
         user = User(username)
         self.users[user.id] = user
-        print(f"Registered user: {username}")
         return user
 
+# =============================
+# Initialize Shop and Data
+# =============================
+
+flipkart = Shop()
+p1 = flipkart.add_product("iPhone 14", 70000, 10)
+p2 = flipkart.add_product("Samsung TV", 45000, 5)
+p3 = flipkart.add_product("Sony Headphones", 3000, 20)
+user1 = flipkart.register_user("sundar_123")
 
 # =============================
-# Simulation
+# Flask Routes (Browser/API)
 # =============================
 
-if __name__ == "__main__":
-    flipkart = Shop()
+@app.route('/')
+def home():
+    return "🛒 Shopping Cart App is running!"
 
-    # Add products
-    p1 = flipkart.add_product("iPhone 14", 70000, 10)
-    p2 = flipkart.add_product("Samsung TV", 45000, 5)
-    p3 = flipkart.add_product("Sony Headphones", 3000, 20)
+@app.route('/add')
+def add_items():
+    result1 = user1.cart.add_item(p1, 1)
+    result2 = user1.cart.add_item(p2, 1)
+    return jsonify({"added": [result1, result2]})
 
-    # Register user
-    user1 = flipkart.register_user("sundar_123")
+@app.route('/cart')
+def view_cart():
+    items, total = user1.cart.view_cart(flipkart.products)
+    return jsonify({"cart": items, "total": total})
 
-    # Add to cart
-    user1.cart.add_item(p1, 1)
-    user1.cart.add_item(p2, 1)
-    user1.cart.view_cart(flipkart.products)
-
-    # Checkout
+@app.route('/checkout')
+def checkout():
     order = user1.cart.checkout(flipkart.products)
+    return jsonify({"order": order})
+
+# =============================
+# Run the App
+# =============================
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=8070)
